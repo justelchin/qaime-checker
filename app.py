@@ -4,7 +4,7 @@ import pandas as pd
 st.set_page_config(page_title="e-Taxes vs 1C Üzləşmə", layout="wide")
 
 st.title("📊 e-Taxes və 1C Qaimə Mütəqabil Yoxlama Sistemi")
-st.write("Düzəliş edilmiş e-Taxes və 1C Excel fayllarını daxil edin.")
+st.write("e-Taxes və 1C Excel fayllarını daxil edin.")
 
 col1, col2 = st.columns(2)
 
@@ -16,18 +16,29 @@ with col2:
     st.header("2. 1C Faylı")
     onec_file = st.file_uploader("1C Alışlar Excel faylını yükləyin", type=["xlsx", "xls"], key="o_file")
 
-def read_clean_excel(file):
+def find_header_and_read(file):
     file.seek(0)
-    # 1-ci sətir başlıq olduğu üçün standart pd.read_excel tam kifayətdir
-    df = pd.read_excel(file)
+    # Əvvəlcə ilk 10 sətri oxuyuruq ki, əsl başlıq sətrini tapaq
+    preview_df = pd.read_excel(file, header=None, nrows=10)
+    
+    header_idx = 0
+    for idx, row in preview_df.iterrows():
+        row_str = " ".join(row.dropna().astype(str)).lower()
+        # Əgər sətirdə vöen, qaimə, adı və ya nömrə kimi sözlər varsa, başlığı ora təyin edirik
+        if any(keyword in row_str for keyword in ["vöen", "voen", "qaimə", "qaime", "nömrə", "nomre", "məbləğ", "mebleg"]):
+            header_idx = idx
+            break
+
+    file.seek(0)
+    df = pd.read_excel(file, header=header_idx)
     df = df.dropna(how='all').dropna(how='all', axis=1)
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
 if etaxes_file and onec_file:
     try:
-        df_etaxes = read_clean_excel(etaxes_file)
-        df_1c = read_clean_excel(onec_file)
+        df_etaxes = find_header_and_read(etaxes_file)
+        df_1c = find_header_and_read(onec_file)
 
         st.success("Hər iki fayl uğurla oxundu!")
 
@@ -37,26 +48,37 @@ if etaxes_file and onec_file:
         
         with c1:
             st.markdown("**e-Taxes Faylı Sütunları:**")
-            e_voen = st.selectbox("VÖEN Sütunu (e-Taxes)", df_etaxes.columns, index=0 if "VÖEN" in df_etaxes.columns else 0, key="ev")
             
-            # Əgər seriya və nömrə ayrıdırsa
+            # VÖEN sütunu
+            v_idx = next((i for i, col in enumerate(df_etaxes.columns) if "vöen" in col.lower() or "voen" in col.lower()), 0)
+            e_voen = st.selectbox("VÖEN Sütunu (e-Taxes)", df_etaxes.columns, index=v_idx, key="ev")
+            
             has_series = st.checkbox("Qaimə seriyası və nömrəsi ayrı sütunlardadır?", value=True)
             if has_series:
-                e_seria = st.selectbox("Qaimə Seriyası Sütunu", df_etaxes.columns, index=df_etaxes.columns.get_loc("Qaimə seriyası") if "Qaimə seriyası" in df_etaxes.columns else 0, key="es")
-                e_qaime = st.selectbox("Qaimə Nömrəsi Sütunu", df_etaxes.columns, index=df_etaxes.columns.get_loc("Qaimə nömrəsi") if "Qaimə nömrəsi" in df_etaxes.columns else 0, key="eq")
+                s_idx = next((i for i, col in enumerate(df_etaxes.columns) if "seri" in col.lower()), 0)
+                q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
+                e_seria = st.selectbox("Qaimə Seriyası Sütunu", df_etaxes.columns, index=s_idx, key="es")
+                e_qaime = st.selectbox("Qaimə Nömrəsi Sütunu", df_etaxes.columns, index=q_idx, key="eq")
             else:
-                e_qaime = st.selectbox("Qaimə № Sütunu (e-Taxes)", df_etaxes.columns, key="eq_single")
+                q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "qaimə" in col.lower() or "nömrə" in col.lower()), 0)
+                e_qaime = st.selectbox("Qaimə № Sütunu (e-Taxes)", df_etaxes.columns, index=q_idx, key="eq_single")
                 
-            e_mebleg = st.selectbox("Yekun Məbləğ Sütunu (e-Taxes)", df_etaxes.columns, index=df_etaxes.columns.get_loc("Yekun məbləğ") if "Yekun məbləğ" in df_etaxes.columns else 0, key="em")
+            m_idx = next((i for i, col in enumerate(df_etaxes.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower() or "mablağ" in col.lower()), 0)
+            e_mebleg = st.selectbox("Yekun Məbləğ Sütunu (e-Taxes)", df_etaxes.columns, index=m_idx, key="em")
 
         with c2:
             st.markdown("**1C Faylı Sütunları:**")
-            o_voen = st.selectbox("VÖEN Sütunu (1C)", df_1c.columns, key="ov")
-            o_qaime = st.selectbox("Qaimə № Sütunu (1C)", df_1c.columns, key="oq")
-            o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, key="om")
+            
+            ov_idx = next((i for i, col in enumerate(df_1c.columns) if "vöen" in col.lower() or "partnyor" in col.lower()), 0)
+            oq_idx = next((i for i, col in enumerate(df_1c.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
+            om_idx = next((i for i, col in enumerate(df_1c.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower()), 0)
+
+            o_voen = st.selectbox("VÖEN / Partnyor Sütunu (1C)", df_1c.columns, index=ov_idx, key="ov")
+            o_qaime = st.selectbox("Qaimə № Sütunu (1C)", df_1c.columns, index=oq_idx, key="oq")
+            o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, index=om_idx, key="om")
 
         if st.button("🚀 Yoxlamanı Başlat"):
-            # e-Taxes Qaimə № təyin edilməsi
+            # e-Taxes Qaimə № təmizlənməsi
             if has_series:
                 df_etaxes['clean_qaime'] = df_etaxes[e_seria].astype(str).str.strip() + df_etaxes[e_qaime].astype(str).str.strip()
             else:
