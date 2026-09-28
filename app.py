@@ -39,7 +39,6 @@ def extract_numbers(val):
     if pd.isna(val):
         return ""
     nums = re.sub(r'\D', '', str(val))
-    # Əgər nömrə uzundursa, son 8 rəqəmini əsas götürürük (e-Taxes 8 rəqəmli nömrə hissəsi)
     if len(nums) >= 8:
         return nums[-8:]
     return nums
@@ -105,25 +104,60 @@ if etaxes_file and onec_file:
             price_mismatch = merged[merged['Məbləğ_Fərqi'].abs() > 0.01].copy()
 
             st.markdown("---")
+            st.header("📊 Ümumi Hesabat (Dashboard)")
+
+            # Dashboard Göstəriciləri
+            total_e_sum = df_etaxes_valid['num_mebleg'].sum()
+            total_1c_sum = df_1c_valid['num_mebleg'].sum()
+            diff_sum = total_e_sum - total_1c_sum
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("e-Taxes Ümumi Dövriyyə", f"{total_e_sum:,.2f} AZN")
+            m2.metric("1C Ümumi Dövriyyə", f"{total_1c_sum:,.2f} AZN")
+            m3.metric("Fərq (Dövriyyə)", f"{diff_sum:,.2f} AZN", delta=f"{diff_sum:,.2f}", delta_color="inverse")
+            m4.metric("Çatışmayan Qaimə Sayı", f"{len(etaxes_not_in_1c) + len(onec_not_in_etaxes)} ədəd")
+
+            st.markdown("---")
             st.header("📈 Yoxlama Nəticələri")
 
+            # Filtrləmə Bölməsi (VÖEN və ya Ad üzrə)
+            all_voens = sorted(list(set(
+                df_etaxes_valid[e_voen].astype(str).unique().tolist() + 
+                df_1c_valid[o_voen].astype(str).unique().tolist()
+            )))
+            
+            selected_voen = st.selectbox("🔍 VÖEN / Şirkət üzrə Filtrlə (Hamısını görmək üçün 'Hamısı' seçin):", ["Hamısı"] + all_voens)
+
+            # Filtrləmə məntiqi
+            if selected_voen != "Hamısı":
+                f_etaxes_not_in_1c = etaxes_not_in_1c[etaxes_not_in_1c[e_voen].astype(str) == selected_voen]
+                f_onec_not_in_etaxes = onec_not_in_etaxes[onec_not_in_etaxes[o_voen].astype(str) == selected_voen]
+                f_price_mismatch = price_mismatch[
+                    (price_mismatch[e_voen].astype(str) == selected_voen) | 
+                    (price_mismatch[o_voen].astype(str) == selected_voen)
+                ]
+            else:
+                f_etaxes_not_in_1c = etaxes_not_in_1c
+                f_onec_not_in_etaxes = onec_not_in_etaxes
+                f_price_mismatch = price_mismatch
+
             tab1, tab2, tab3 = st.tabs([
-                f"❌ 1C-də Olmayanlar ({len(etaxes_not_in_1c)})", 
-                f"⚠️ Portalda Olmayanlar ({len(onec_not_in_etaxes)})", 
-                f"💰 Məbləğ Fərqi Olanlar ({len(price_mismatch)})"
+                f"❌ 1C-də Olmayanlar ({len(f_etaxes_not_in_1c)})", 
+                f"⚠️ Portalda Olmayanlar ({len(f_onec_not_in_etaxes)})", 
+                f"💰 Məbləğ Fərqi Olanlar ({len(f_price_mismatch)})"
             ])
 
             with tab1:
                 st.error("Bu qaimələr e-Taxes portalında var, lakin 1C-yə işlənməyib:")
-                st.dataframe(etaxes_not_in_1c.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'))
+                st.dataframe(f_etaxes_not_in_1c.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
 
             with tab2:
                 st.warning("Bu qaimələr 1C-də var, lakin e-Taxes portalında tapılmadı:")
-                st.dataframe(onec_not_in_etaxes.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'))
+                st.dataframe(f_onec_not_in_etaxes.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
 
             with tab3:
                 st.info("Bu qaimələr hər iki tərəfdə var, lakin məbləğləri üst-üstə düşmür:")
-                st.dataframe(price_mismatch)
+                st.dataframe(f_price_mismatch, use_container_width=True)
 
     except Exception as e:
         st.error(f"Yoxlama zamanı xəta baş verdi: {e}")
