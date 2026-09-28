@@ -74,26 +74,42 @@ if etaxes_file and onec_file:
             oa_idx = next((i for i, col in enumerate(df_1c.columns) if "partnyor" in col.lower() or "adı" in col.lower() or "adi" in col.lower() or "kontragent" in col.lower()), 0)
             oq_idx = next((i for i, col in enumerate(df_1c.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
             om_idx = next((i for i, col in enumerate(df_1c.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower()), 0)
-            val_idx = next((i for i, col in enumerate(df_1c.columns) if "valyuta" in col.lower() or "val" in col.lower() or "curr" in col.lower()), 0)
+            val_idx = next((i for i, col in enumerate(df_1c.columns) if "valyuta" in col.lower() or "val" in col.lower() or "curr" in col.lower()), None)
 
             o_voen = st.selectbox("VÖEN Sütunu (1C)", df_1c.columns, index=ov_idx, key="ov")
             o_ad = st.selectbox("Şirkət Adı / Partnyor Sütunu (1C)", df_1c.columns, index=oa_idx, key="oa")
             o_qaime = st.selectbox("Qaimə № Sütunu (1C)", df_1c.columns, index=oq_idx, key="oq")
             o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, index=om_idx, key="om")
-            o_valyuta = st.selectbox("Valyuta Sütunu (1C) [İstəyə bağlı]", ["Yoxdur"] + list(df_1c.columns), index=val_idx+1 if val_idx < len(df_1c.columns) else 0, key="oval")
+            
+            # Valyuta Sütunu seçimi
+            val_options = ["Yoxdur"] + list(df_1c.columns)
+            default_val_index = val_options.index(df_1c.columns[val_idx]) if val_idx is not None else 0
+            o_valyuta = st.selectbox("Valyuta Sütunu (1C) [İstəyə bağlı]", val_options, index=default_val_index, key="oval")
+
+            # Valyuta seçildikdə birbaşa həmin valyutaların siyahısını göstəririk
+            selected_curr = "Bütün Valyutalar"
+            if o_valyuta != "Yoxdur":
+                unique_currencies = sorted(df_1c[o_valyuta].dropna().astype(str).str.upper().unique().tolist())
+                
+                # AZN sıradadırsa susmaya görə AZN seçilsin
+                azn_index = 1
+                for idx, curr in enumerate(unique_currencies):
+                    if "AZN" in curr:
+                        azn_index = idx + 1
+                        break
+                        
+                selected_curr = st.selectbox(
+                    "💱 Valyutanı Seçin (1C):", 
+                    ["Bütün Valyutalar"] + unique_currencies, 
+                    index=azn_index if len(unique_currencies) >= azn_index else 0, 
+                    key="scurr"
+                )
 
         if st.button("🚀 Yoxlamanı Başlat"):
-            # 1C-də Valyuta filtri seçimi
+            # 1C Faylını seçilmiş valyutaya görə filtrləyirik
             df_1c_filtered = df_1c.copy()
-            
-            if o_valyuta != "Yoxdur":
-                currencies = df_1c[o_valyuta].dropna().astype(str).str.upper().unique().tolist()
-                st.markdown("---")
-                st.subheader("💱 Valyuta Süzgəci")
-                selected_curr = st.radio("Müqayisə ediləcək valyutanı seçin:", ["Bütün Valyutalar"] + currencies, horizontal=True)
-                
-                if selected_curr != "Bütün Valyutalar":
-                    df_1c_filtered = df_1c[df_1c[o_valyuta].astype(str).str.upper() == selected_curr].copy()
+            if o_valyuta != "Yoxdur" and selected_curr != "Bütün Valyutalar":
+                df_1c_filtered = df_1c[df_1c[o_valyuta].astype(str).str.upper() == selected_curr].copy()
 
             # Təmiz rəqəmli qaimə key-i yaradırıq
             df_etaxes['clean_qaime'] = df_etaxes[e_qaime].apply(extract_numbers)
@@ -130,9 +146,11 @@ if etaxes_file and onec_file:
             total_1c_sum = df_1c_valid['num_mebleg'].sum()
             diff_sum = total_e_sum - total_1c_sum
 
+            curr_label = f" ({selected_curr})" if selected_curr != "Bütün Valyutalar" else ""
+
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("e-Taxes Ümumi Dövriyyə", f"{total_e_sum:,.2f}")
-            m2.metric("1C Ümumi Dövriyyə", f"{total_1c_sum:,.2f}")
+            m1.metric(f"e-Taxes Ümumi Dövriyyə", f"{total_e_sum:,.2f} AZN")
+            m2.metric(f"1C Ümumi Dövriyyə{curr_label}", f"{total_1c_sum:,.2f} {selected_curr if selected_curr != 'Bütün Valyutalar' else ''}")
             m3.metric("Fərq (Dövriyyə)", f"{diff_sum:,.2f}", delta=f"{diff_sum:,.2f}", delta_color="inverse")
             m4.metric("Çatışmayan Qaimə Sayı", f"{len(etaxes_not_in_1c) + len(onec_not_in_etaxes)} ədəd")
 
