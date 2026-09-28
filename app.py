@@ -74,24 +74,38 @@ if etaxes_file and onec_file:
             oa_idx = next((i for i, col in enumerate(df_1c.columns) if "partnyor" in col.lower() or "adı" in col.lower() or "adi" in col.lower() or "kontragent" in col.lower()), 0)
             oq_idx = next((i for i, col in enumerate(df_1c.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
             om_idx = next((i for i, col in enumerate(df_1c.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower()), 0)
+            val_idx = next((i for i, col in enumerate(df_1c.columns) if "valyuta" in col.lower() or "val" in col.lower() or "curr" in col.lower()), 0)
 
             o_voen = st.selectbox("VÖEN Sütunu (1C)", df_1c.columns, index=ov_idx, key="ov")
             o_ad = st.selectbox("Şirkət Adı / Partnyor Sütunu (1C)", df_1c.columns, index=oa_idx, key="oa")
             o_qaime = st.selectbox("Qaimə № Sütunu (1C)", df_1c.columns, index=oq_idx, key="oq")
             o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, index=om_idx, key="om")
+            o_valyuta = st.selectbox("Valyuta Sütunu (1C) [İstəyə bağlı]", ["Yoxdur"] + list(df_1c.columns), index=val_idx+1 if val_idx < len(df_1c.columns) else 0, key="oval")
 
         if st.button("🚀 Yoxlamanı Başlat"):
+            # 1C-də Valyuta filtri seçimi
+            df_1c_filtered = df_1c.copy()
+            
+            if o_valyuta != "Yoxdur":
+                currencies = df_1c[o_valyuta].dropna().astype(str).str.upper().unique().tolist()
+                st.markdown("---")
+                st.subheader("💱 Valyuta Süzgəci")
+                selected_curr = st.radio("Müqayisə ediləcək valyutanı seçin:", ["Bütün Valyutalar"] + currencies, horizontal=True)
+                
+                if selected_curr != "Bütün Valyutalar":
+                    df_1c_filtered = df_1c[df_1c[o_valyuta].astype(str).str.upper() == selected_curr].copy()
+
             # Təmiz rəqəmli qaimə key-i yaradırıq
             df_etaxes['clean_qaime'] = df_etaxes[e_qaime].apply(extract_numbers)
-            df_1c['clean_qaime'] = df_1c[o_qaime].apply(extract_numbers)
+            df_1c_filtered['clean_qaime'] = df_1c_filtered[o_qaime].apply(extract_numbers)
 
             # Məbləğləri rəqəmə çevirmək
             df_etaxes['num_mebleg'] = pd.to_numeric(df_etaxes[e_mebleg].astype(str).str.replace(',', '.').str.replace(' ', ''), errors='coerce').fillna(0)
-            df_1c['num_mebleg'] = pd.to_numeric(df_1c[o_mebleg].astype(str).str.replace(',', '.').str.replace(' ', ''), errors='coerce').fillna(0)
+            df_1c_filtered['num_mebleg'] = pd.to_numeric(df_1c_filtered[o_mebleg].astype(str).str.replace(',', '.').str.replace(' ', ''), errors='coerce').fillna(0)
 
             # Boş olmayan qaimələri filtrləyirik
             df_etaxes_valid = df_etaxes[df_etaxes['clean_qaime'] != ''].copy()
-            df_1c_valid = df_1c[df_1c['clean_qaime'] != ''].copy()
+            df_1c_valid = df_1c_filtered[df_1c_filtered['clean_qaime'] != ''].copy()
 
             # 1. e-Taxes-də olub 1C-də OLMAYANLAR
             etaxes_not_in_1c = df_etaxes_valid[~df_etaxes_valid['clean_qaime'].isin(df_1c_valid['clean_qaime'])].copy()
@@ -117,66 +131,31 @@ if etaxes_file and onec_file:
             diff_sum = total_e_sum - total_1c_sum
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("e-Taxes Ümumi Dövriyyə", f"{total_e_sum:,.2f} AZN")
-            m2.metric("1C Ümumi Dövriyyə", f"{total_1c_sum:,.2f} AZN")
-            m3.metric("Fərq (Dövriyyə)", f"{diff_sum:,.2f} AZN", delta=f"{diff_sum:,.2f}", delta_color="inverse")
+            m1.metric("e-Taxes Ümumi Dövriyyə", f"{total_e_sum:,.2f}")
+            m2.metric("1C Ümumi Dövriyyə", f"{total_1c_sum:,.2f}")
+            m3.metric("Fərq (Dövriyyə)", f"{diff_sum:,.2f}", delta=f"{diff_sum:,.2f}", delta_color="inverse")
             m4.metric("Çatışmayan Qaimə Sayı", f"{len(etaxes_not_in_1c) + len(onec_not_in_etaxes)} ədəd")
 
             st.markdown("---")
             st.header("📈 Yoxlama Nəticələri")
 
-            # Bütün unikallığı olan Şirkət Adları Siyahısı
-            all_names = sorted(list(set(
-                [str(x).strip() for x in df_etaxes_valid[e_ad].dropna().unique() if str(x).strip() != ''] + 
-                [str(x).strip() for x in df_1c_valid[o_ad].dropna().unique() if str(x).strip() != '']
-            )))
-            
-            selected_name = st.selectbox("🔍 Şirkət Adı üzrə Filtrlə (Hamısını görmək üçün 'Hamısı' seçin):", ["Hamısı"] + all_names)
-
-            # Sərbəst filtrləmə (mətni daxilində axtarır və ya eyni VÖEN-ə görə filtrləyir)
-            if selected_name != "Hamısı":
-                # Seçilən adın e-Taxes və 1C-dəki VÖEN-ini tapırıq
-                matched_voens = set(
-                    df_etaxes_valid[df_etaxes_valid[e_ad].astype(str).str.strip() == selected_name][e_voen].astype(str).tolist() +
-                    df_1c_valid[df_1c_valid[o_ad].astype(str).str.strip() == selected_name][o_voen].astype(str).tolist()
-                )
-
-                f_etaxes_not_in_1c = etaxes_not_in_1c[
-                    (etaxes_not_in_1c[e_ad].astype(str).str.strip() == selected_name) | 
-                    (etaxes_not_in_1c[e_voen].astype(str).isin(matched_voens))
-                ]
-                f_onec_not_in_etaxes = onec_not_in_etaxes[
-                    (onec_not_in_etaxes[o_ad].astype(str).str.strip() == selected_name) | 
-                    (onec_not_in_etaxes[o_voen].astype(str).isin(matched_voens))
-                ]
-                
-                # Məbləğ fərqi üçün süzgəc
-                f_price_mismatch = price_mismatch[
-                    (price_mismatch.astype(str).apply(lambda row: selected_name in row.values, axis=1)) |
-                    (price_mismatch.astype(str).apply(lambda row: any(v in row.values for v in matched_voens), axis=1))
-                ]
-            else:
-                f_etaxes_not_in_1c = etaxes_not_in_1c
-                f_onec_not_in_etaxes = onec_not_in_etaxes
-                f_price_mismatch = price_mismatch
-
             tab1, tab2, tab3 = st.tabs([
-                f"❌ 1C-də Olmayanlar ({len(f_etaxes_not_in_1c)})", 
-                f"⚠️ Portalda Olmayanlar ({len(f_onec_not_in_etaxes)})", 
-                f"💰 Məbləğ Fərqi Olanlar ({len(f_price_mismatch)})"
+                f"❌ 1C-də Olmayanlar ({len(etaxes_not_in_1c)})", 
+                f"⚠️ Portalda Olmayanlar ({len(onec_not_in_etaxes)})", 
+                f"💰 Məbləğ Fərqi Olanlar ({len(price_mismatch)})"
             ])
 
             with tab1:
-                st.error("Bu qaimələr e-Taxes portalında var, lakin 1C-yə işlənməyib:")
-                st.dataframe(f_etaxes_not_in_1c.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
+                st.error("Bu qaimələr e-Taxes portalında var, lakin 1C-yə (seçilmiş valyutaya) işlənməyib:")
+                st.dataframe(etaxes_not_in_1c.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
 
             with tab2:
                 st.warning("Bu qaimələr 1C-də var, lakin e-Taxes portalında tapılmadı:")
-                st.dataframe(f_onec_not_in_etaxes.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
+                st.dataframe(onec_not_in_etaxes.drop(columns=['clean_qaime', 'num_mebleg'], errors='ignore'), use_container_width=True)
 
             with tab3:
                 st.info("Bu qaimələr hər iki tərəfdə var, lakin məbləğləri üst-üstə düşmür:")
-                st.dataframe(f_price_mismatch.drop(columns=['clean_qaime', 'num_mebleg_eTaxes', 'num_mebleg_1C'], errors='ignore'), use_container_width=True)
+                st.dataframe(price_mismatch.drop(columns=['clean_qaime', 'num_mebleg_eTaxes', 'num_mebleg_1C'], errors='ignore'), use_container_width=True)
 
     except Exception as e:
         st.error(f"Yoxlama zamanı xəta baş verdi: {e}")
