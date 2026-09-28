@@ -24,7 +24,7 @@ def find_header_and_read(file):
     header_idx = 0
     for idx, row in preview_df.iterrows():
         row_str = " ".join(row.dropna().astype(str)).lower()
-        if any(keyword in row_str for keyword in ["vöen", "voen", "qaimə", "qaime", "nömrə", "nomre", "məbləğ", "mebleg"]):
+        if any(keyword in row_str for keyword in ["vöen", "voen", "qaimə", "qaime", "nömrə", "nomre", "məbləğ", "mebleg", "adı", "adi"]):
             header_idx = idx
             break
 
@@ -59,6 +59,9 @@ if etaxes_file and onec_file:
             v_idx = next((i for i, col in enumerate(df_etaxes.columns) if "vöen" in col.lower() or "voen" in col.lower()), 0)
             e_voen = st.selectbox("VÖEN Sütunu (e-Taxes)", df_etaxes.columns, index=v_idx, key="ev")
             
+            a_idx = next((i for i, col in enumerate(df_etaxes.columns) if "adı" in col.lower() or "adi" in col.lower() or "şirkət" in col.lower() or "sirket" in col.lower()), 0)
+            e_ad = st.selectbox("Şirkət Adı Sütunu (e-Taxes)", df_etaxes.columns, index=a_idx, key="ea")
+
             q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "nömrə" in col.lower() or "nomre" in col.lower() or "qaimə" in col.lower()), 0)
             e_qaime = st.selectbox("Qaimə Nömrəsi Sütunu (e-Taxes)", df_etaxes.columns, index=q_idx, key="eq")
                 
@@ -67,11 +70,13 @@ if etaxes_file and onec_file:
 
         with c2:
             st.markdown("**1C Faylı Sütunları:**")
-            ov_idx = next((i for i, col in enumerate(df_1c.columns) if "vöen" in col.lower() or "partnyor" in col.lower()), 0)
+            ov_idx = next((i for i, col in enumerate(df_1c.columns) if "vöen" in col.lower() or "voen" in col.lower()), 0)
+            oa_idx = next((i for i, col in enumerate(df_1c.columns) if "partnyor" in col.lower() or "adı" in col.lower() or "adi" in col.lower() or "kontragent" in col.lower()), 0)
             oq_idx = next((i for i, col in enumerate(df_1c.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
             om_idx = next((i for i, col in enumerate(df_1c.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower()), 0)
 
-            o_voen = st.selectbox("VÖEN / Partnyor Sütunu (1C)", df_1c.columns, index=ov_idx, key="ov")
+            o_voen = st.selectbox("VÖEN Sütunu (1C)", df_1c.columns, index=ov_idx, key="ov")
+            o_ad = st.selectbox("Şirkət Adı / Partnyor Sütunu (1C)", df_1c.columns, index=oa_idx, key="oa")
             o_qaime = st.selectbox("Qaimə № Sütunu (1C)", df_1c.columns, index=oq_idx, key="oq")
             o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, index=om_idx, key="om")
 
@@ -120,21 +125,26 @@ if etaxes_file and onec_file:
             st.markdown("---")
             st.header("📈 Yoxlama Nəticələri")
 
-            # Filtrləmə Bölməsi (VÖEN və ya Ad üzrə)
-            all_voens = sorted(list(set(
-                df_etaxes_valid[e_voen].astype(str).unique().tolist() + 
-                df_1c_valid[o_voen].astype(str).unique().tolist()
+            # Filtrləmə Bölməsi (Yalnız Şirkət Adları üzrə)
+            all_names = sorted(list(set(
+                df_etaxes_valid[e_ad].dropna().astype(str).unique().tolist() + 
+                df_1c_valid[o_ad].dropna().astype(str).unique().tolist()
             )))
             
-            selected_voen = st.selectbox("🔍 VÖEN / Şirkət üzrə Filtrlə (Hamısını görmək üçün 'Hamısı' seçin):", ["Hamısı"] + all_voens)
+            selected_name = st.selectbox("🔍 Şirkət Adı üzrə Filtrlə (Hamısını görmək üçün 'Hamısı' seçin):", ["Hamısı"] + all_names)
 
             # Filtrləmə məntiqi
-            if selected_voen != "Hamısı":
-                f_etaxes_not_in_1c = etaxes_not_in_1c[etaxes_not_in_1c[e_voen].astype(str) == selected_voen]
-                f_onec_not_in_etaxes = onec_not_in_etaxes[onec_not_in_etaxes[o_voen].astype(str) == selected_voen]
+            if selected_name != "Hamısı":
+                f_etaxes_not_in_1c = etaxes_not_in_1c[etaxes_not_in_1c[e_ad].astype(str) == selected_name]
+                f_onec_not_in_etaxes = onec_not_in_etaxes[onec_not_in_etaxes[o_ad].astype(str) == selected_name]
+                
+                # Məbləğ fərqi cədvəlində eTaxes və ya 1C tərəfində adın uyğun gəlməsi
+                e_ad_col = e_ad if e_ad in price_mismatch.columns else f"{e_ad}_eTaxes"
+                o_ad_col = o_ad if o_ad in price_mismatch.columns else f"{o_ad}_1C"
+                
                 f_price_mismatch = price_mismatch[
-                    (price_mismatch[e_voen].astype(str) == selected_voen) | 
-                    (price_mismatch[o_voen].astype(str) == selected_voen)
+                    (price_mismatch[e_ad_col].astype(str) == selected_name) | 
+                    (price_mismatch[o_ad_col].astype(str) == selected_name)
                 ]
             else:
                 f_etaxes_not_in_1c = etaxes_not_in_1c
