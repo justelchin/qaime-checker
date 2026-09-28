@@ -7,22 +7,31 @@ st.title("📊 e-Taxes və 1C Qaimə Mütəqabil Yoxlama Sistemi")
 st.write("e-Taxes portalından və 1C-dən yüklədiyiniz Excel fayllarını daxil edin.")
 
 def load_excel_smart(file):
-    """Excel faylında əsas başlıq sətrini avtomatik tapan funksiya"""
+    """Excel faylında əsas başlıq sətrini təhlükəsiz tapan funksiya"""
     df_raw = pd.read_excel(file, header=None)
     header_idx = 0
+    
     for idx, row in df_raw.iterrows():
-        # Əgər sətirdə çoxlu mətn varsa və ya e-Taxes/1C-nin standart sözləri varsa
-        row_str = row.astype(str).str.lower().to_list()
-        if any('qaimə' in s or 'voen' in s or 'vöen' in s or 'nömrə' in s or 'məbləğ' in s or 'alınma' in s for s in row_str):
+        # Bütün xanaları təhlükəsiz şəkildə kiçik hərfli mətnə çeviririk
+        row_str = [str(val).lower() if pd.notna(val) else "" for val in row]
+        row_combined = " ".join(row_str)
+        
+        # Əgər sətirdə açar sözlərdən biri varsa, həmin sətri başlıq seçirik
+        keywords = ['qaimə', 'qaime', 'voen', 'vöen', 'nömrə', 'nomre', 'məbləğ', 'mebleg', 'alınma', 'qeydiyyat', 'təchizatçı']
+        if any(kw in row_combined for kw in keywords):
             header_idx = idx
             break
-    
+            
     file.seek(0)
     df = pd.read_excel(file, header=header_idx)
-    # Təmizləmə: Tamamilə boş olan sütun və sətirləri silmək
+    
+    # Boş sətir və sütunları silmək
     df = df.dropna(how='all').dropna(how='all', axis=1)
-    # Sütun adlarındakı boşluqları təmizləmək
+    
+    # Sütun adlarını düzəltmək
     df.columns = [str(c).strip() for c in df.columns]
+    
+    # Təkrar olunan "Unnamed" adlarını süzgəcdən keçirmək
     return df
 
 col1, col2 = st.columns(2)
@@ -56,13 +65,13 @@ if etaxes_file and onec_file:
             o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, key="om")
 
         if st.button("🚀 Yoxlamanı Başlat"):
-            # Təmizləmə
+            # Mətn təmizlənməsi
             df_etaxes['clean_qaime'] = df_etaxes[e_qaime].astype(str).str.strip().str.upper()
             df_1c['clean_qaime'] = df_1c[o_qaime].astype(str).str.strip().str.upper()
 
-            # Məbləğləri rəqəmə çevirmək (xətaların qarşısını almaq üçün)
-            df_etaxes['num_mebleg'] = pd.to_numeric(df_etaxes[e_mebleg], errors='coerce').fillna(0)
-            df_1c['num_mebleg'] = pd.to_numeric(df_1c[o_mebleg], errors='coerce').fillna(0)
+            # Məbləğləri rəqəmə çevirmək
+            df_etaxes['num_mebleg'] = pd.to_numeric(df_etaxes[e_mebleg].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+            df_1c['num_mebleg'] = pd.to_numeric(df_1c[o_mebleg].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
 
             # 1. e-Taxes-də olub 1C-də OLMAYANLAR
             etaxes_not_in_1c = df_etaxes[~df_etaxes['clean_qaime'].isin(df_1c['clean_qaime'])].copy()
@@ -76,7 +85,7 @@ if etaxes_file and onec_file:
                 on='clean_qaime', 
                 suffixes=('_eTaxes', '_1C')
             )
-            merged['Məbləğ_Fərqi'] = merged['num_mebleg_eTaxes'] - merged['num_mebleg_1C']
+            merged['Məbləğ_Fərqi'] = (merged['num_mebleg_eTaxes'] - merged['num_mebleg_1C']).round(2)
             price_mismatch = merged[merged['Məbləğ_Fərqi'].abs() > 0.01].copy()
 
             st.markdown("---")
