@@ -125,26 +125,35 @@ if etaxes_file and onec_file:
             st.markdown("---")
             st.header("📈 Yoxlama Nəticələri")
 
-            # Filtrləmə Bölməsi (Yalnız Şirkət Adları üzrə)
+            # Bütün unikallığı olan Şirkət Adları Siyahısı
             all_names = sorted(list(set(
-                df_etaxes_valid[e_ad].dropna().astype(str).unique().tolist() + 
-                df_1c_valid[o_ad].dropna().astype(str).unique().tolist()
+                [str(x).strip() for x in df_etaxes_valid[e_ad].dropna().unique() if str(x).strip() != ''] + 
+                [str(x).strip() for x in df_1c_valid[o_ad].dropna().unique() if str(x).strip() != '']
             )))
             
             selected_name = st.selectbox("🔍 Şirkət Adı üzrə Filtrlə (Hamısını görmək üçün 'Hamısı' seçin):", ["Hamısı"] + all_names)
 
-            # Filtrləmə məntiqi
+            # Sərbəst filtrləmə (mətni daxilində axtarır və ya eyni VÖEN-ə görə filtrləyir)
             if selected_name != "Hamısı":
-                f_etaxes_not_in_1c = etaxes_not_in_1c[etaxes_not_in_1c[e_ad].astype(str) == selected_name]
-                f_onec_not_in_etaxes = onec_not_in_etaxes[onec_not_in_etaxes[o_ad].astype(str) == selected_name]
+                # Seçilən adın e-Taxes və 1C-dəki VÖEN-ini tapırıq
+                matched_voens = set(
+                    df_etaxes_valid[df_etaxes_valid[e_ad].astype(str).str.strip() == selected_name][e_voen].astype(str).tolist() +
+                    df_1c_valid[df_1c_valid[o_ad].astype(str).str.strip() == selected_name][o_voen].astype(str).tolist()
+                )
+
+                f_etaxes_not_in_1c = etaxes_not_in_1c[
+                    (etaxes_not_in_1c[e_ad].astype(str).str.strip() == selected_name) | 
+                    (etaxes_not_in_1c[e_voen].astype(str).isin(matched_voens))
+                ]
+                f_onec_not_in_etaxes = onec_not_in_etaxes[
+                    (onec_not_in_etaxes[o_ad].astype(str).str.strip() == selected_name) | 
+                    (onec_not_in_etaxes[o_voen].astype(str).isin(matched_voens))
+                ]
                 
-                # Məbləğ fərqi cədvəlində eTaxes və ya 1C tərəfində adın uyğun gəlməsi
-                e_ad_col = e_ad if e_ad in price_mismatch.columns else f"{e_ad}_eTaxes"
-                o_ad_col = o_ad if o_ad in price_mismatch.columns else f"{o_ad}_1C"
-                
+                # Məbləğ fərqi üçün süzgəc
                 f_price_mismatch = price_mismatch[
-                    (price_mismatch[e_ad_col].astype(str) == selected_name) | 
-                    (price_mismatch[o_ad_col].astype(str) == selected_name)
+                    (price_mismatch.astype(str).apply(lambda row: selected_name in row.values, axis=1)) |
+                    (price_mismatch.astype(str).apply(lambda row: any(v in row.values for v in matched_voens), axis=1))
                 ]
             else:
                 f_etaxes_not_in_1c = etaxes_not_in_1c
@@ -167,7 +176,7 @@ if etaxes_file and onec_file:
 
             with tab3:
                 st.info("Bu qaimələr hər iki tərəfdə var, lakin məbləğləri üst-üstə düşmür:")
-                st.dataframe(f_price_mismatch, use_container_width=True)
+                st.dataframe(f_price_mismatch.drop(columns=['clean_qaime', 'num_mebleg_eTaxes', 'num_mebleg_1C'], errors='ignore'), use_container_width=True)
 
     except Exception as e:
         st.error(f"Yoxlama zamanı xəta baş verdi: {e}")
