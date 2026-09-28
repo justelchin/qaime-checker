@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 
 st.set_page_config(page_title="e-Taxes vs 1C Üzləşmə", layout="wide")
 
@@ -18,13 +19,11 @@ with col2:
 
 def find_header_and_read(file):
     file.seek(0)
-    # Əvvəlcə ilk 10 sətri oxuyuruq ki, əsl başlıq sətrini tapaq
     preview_df = pd.read_excel(file, header=None, nrows=10)
     
     header_idx = 0
     for idx, row in preview_df.iterrows():
         row_str = " ".join(row.dropna().astype(str)).lower()
-        # Əgər sətirdə vöen, qaimə, adı və ya nömrə kimi sözlər varsa, başlığı ora təyin edirik
         if any(keyword in row_str for keyword in ["vöen", "voen", "qaimə", "qaime", "nömrə", "nomre", "məbləğ", "mebleg"]):
             header_idx = idx
             break
@@ -34,6 +33,16 @@ def find_header_and_read(file):
     df = df.dropna(how='all').dropna(how='all', axis=1)
     df.columns = [str(c).strip() for c in df.columns]
     return df
+
+def extract_numbers(val):
+    """Mətndən yalnız rəqəmləri çıxarır (xüsusən qaimə nömrəsi üçün)"""
+    if pd.isna(val):
+        return ""
+    nums = re.sub(r'\D', '', str(val))
+    # Əgər nömrə uzundursa, son 8 rəqəmini əsas götürürük (e-Taxes 8 rəqəmli nömrə hissəsi)
+    if len(nums) >= 8:
+        return nums[-8:]
+    return nums
 
 if etaxes_file and onec_file:
     try:
@@ -48,27 +57,17 @@ if etaxes_file and onec_file:
         
         with c1:
             st.markdown("**e-Taxes Faylı Sütunları:**")
-            
-            # VÖEN sütunu
             v_idx = next((i for i, col in enumerate(df_etaxes.columns) if "vöen" in col.lower() or "voen" in col.lower()), 0)
             e_voen = st.selectbox("VÖEN Sütunu (e-Taxes)", df_etaxes.columns, index=v_idx, key="ev")
             
-            has_series = st.checkbox("Qaimə seriyası və nömrəsi ayrı sütunlardadır?", value=True)
-            if has_series:
-                s_idx = next((i for i, col in enumerate(df_etaxes.columns) if "seri" in col.lower()), 0)
-                q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
-                e_seria = st.selectbox("Qaimə Seriyası Sütunu", df_etaxes.columns, index=s_idx, key="es")
-                e_qaime = st.selectbox("Qaimə Nömrəsi Sütunu", df_etaxes.columns, index=q_idx, key="eq")
-            else:
-                q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "qaimə" in col.lower() or "nömrə" in col.lower()), 0)
-                e_qaime = st.selectbox("Qaimə № Sütunu (e-Taxes)", df_etaxes.columns, index=q_idx, key="eq_single")
+            q_idx = next((i for i, col in enumerate(df_etaxes.columns) if "nömrə" in col.lower() or "nomre" in col.lower() or "qaimə" in col.lower()), 0)
+            e_qaime = st.selectbox("Qaimə Nömrəsi Sütunu (e-Taxes)", df_etaxes.columns, index=q_idx, key="eq")
                 
             m_idx = next((i for i, col in enumerate(df_etaxes.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower() or "mablağ" in col.lower()), 0)
             e_mebleg = st.selectbox("Yekun Məbləğ Sütunu (e-Taxes)", df_etaxes.columns, index=m_idx, key="em")
 
         with c2:
             st.markdown("**1C Faylı Sütunları:**")
-            
             ov_idx = next((i for i, col in enumerate(df_1c.columns) if "vöen" in col.lower() or "partnyor" in col.lower()), 0)
             oq_idx = next((i for i, col in enumerate(df_1c.columns) if "nömrə" in col.lower() or "nomre" in col.lower()), 0)
             om_idx = next((i for i, col in enumerate(df_1c.columns) if "məbləğ" in col.lower() or "mebleg" in col.lower()), 0)
@@ -78,30 +77,27 @@ if etaxes_file and onec_file:
             o_mebleg = st.selectbox("Yekun Məbləğ Sütunu (1C)", df_1c.columns, index=om_idx, key="om")
 
         if st.button("🚀 Yoxlamanı Başlat"):
-            # e-Taxes Qaimə № təmizlənməsi
-            if has_series:
-                df_etaxes['clean_qaime'] = df_etaxes[e_seria].astype(str).str.strip() + df_etaxes[e_qaime].astype(str).str.strip()
-            else:
-                df_etaxes['clean_qaime'] = df_etaxes[e_qaime].astype(str).str.strip()
-            
-            df_etaxes['clean_qaime'] = df_etaxes['clean_qaime'].str.upper()
-
-            # 1C Qaimə № təmizlənməsi
-            df_1c['clean_qaime'] = df_1c[o_qaime].astype(str).str.strip().str.upper()
+            # Təmiz rəqəmli qaimə key-i yaradırıq
+            df_etaxes['clean_qaime'] = df_etaxes[e_qaime].apply(extract_numbers)
+            df_1c['clean_qaime'] = df_1c[o_qaime].apply(extract_numbers)
 
             # Məbləğləri rəqəmə çevirmək
             df_etaxes['num_mebleg'] = pd.to_numeric(df_etaxes[e_mebleg].astype(str).str.replace(',', '.').str.replace(' ', ''), errors='coerce').fillna(0)
             df_1c['num_mebleg'] = pd.to_numeric(df_1c[o_mebleg].astype(str).str.replace(',', '.').str.replace(' ', ''), errors='coerce').fillna(0)
 
+            # Boş olmayan qaimələri filtrləyirik
+            df_etaxes_valid = df_etaxes[df_etaxes['clean_qaime'] != ''].copy()
+            df_1c_valid = df_1c[df_1c['clean_qaime'] != ''].copy()
+
             # 1. e-Taxes-də olub 1C-də OLMAYANLAR
-            etaxes_not_in_1c = df_etaxes[~df_etaxes['clean_qaime'].isin(df_1c['clean_qaime'])].copy()
+            etaxes_not_in_1c = df_etaxes_valid[~df_etaxes_valid['clean_qaime'].isin(df_1c_valid['clean_qaime'])].copy()
 
             # 2. 1C-də olub e-Taxes-də OLMAYANLAR
-            onec_not_in_etaxes = df_1c[~df_1c['clean_qaime'].isin(df_etaxes['clean_qaime'])].copy()
+            onec_not_in_etaxes = df_1c_valid[~df_1c_valid['clean_qaime'].isin(df_etaxes_valid['clean_qaime'])].copy()
 
             # 3. Məbləğ Fərqi Olanlar
             merged = pd.merge(
-                df_etaxes, df_1c, 
+                df_etaxes_valid, df_1c_valid, 
                 on='clean_qaime', 
                 suffixes=('_eTaxes', '_1C')
             )
@@ -127,12 +123,7 @@ if etaxes_file and onec_file:
 
             with tab3:
                 st.info("Bu qaimələr hər iki tərəfdə var, lakin məbləğləri üst-üstə düşmür:")
-                st.dataframe(price_mismatch[[
-                    'clean_qaime', 
-                    e_mebleg + '_eTaxes', 
-                    o_mebleg + '_1C', 
-                    'Məbləğ_Fərqi'
-                ]])
+                st.dataframe(price_mismatch)
 
     except Exception as e:
-        st.error(f"Fayllar oxunarkən xəta baş verdi: {e}")
+        st.error(f"Yoxlama zamanı xəta baş verdi: {e}")
